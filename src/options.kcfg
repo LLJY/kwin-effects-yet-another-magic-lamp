@@ -10,6 +10,7 @@
         </entry>
         <entry name="GridResolution" type="UInt">
             <default>30</default>
+            <min>1</min>
         </entry>
         <entry name="MaxBumpDistance" type="UInt">
             <default>30</default>

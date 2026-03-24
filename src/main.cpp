@@ -15,12 +15,14 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Own
 #include "YetAnotherMagicLampEffect.h"
 
-KWIN_EFFECT_FACTORY_SUPPORTED_ENABLED(YetAnotherMagicLampEffect,
-                                      "metadata.json",
-                                      return YetAnotherMagicLampEffect::supported();,
-                                      return false;)
+namespace KWin {
 
-#include "plugin.moc"
+KWIN_EFFECT_FACTORY_SUPPORTED(YetAnotherMagicLampEffect,
+    "metadata.json",
+    return YetAnotherMagicLampEffect::supported();)
+
+} // namespace KWin
+
+#include "main.moc"

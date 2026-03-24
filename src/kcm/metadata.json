@@ -1,9 +1,6 @@
 {
     "KPlugin": {
-        "Name": "Yet Another Magic Lamp",
-        "ServiceTypes": [
-            "KCModule"
-        ]
+        "Name": "Yet Another Magic Lamp"
     },
     "X-KDE-ParentComponents": [
         "kwin4_effect_yetanothermagiclamp"

@@ -22,18 +22,22 @@
 #include "YetAnotherMagicLampConfig.h"
 #include "kwineffects_interface.h"
 
-YetAnotherMagicLampEffectKCM::YetAnotherMagicLampEffectKCM(QWidget* parent, const QVariantList& args)
-    : KCModule(parent, args)
-    , m_ui(new Ui::YetAnotherMagicLampEffectKCM)
+#include <KPluginFactory>
+#include <KSharedConfig>
+
+K_PLUGIN_CLASS(YetAnotherMagicLampEffectKCM)
+
+YetAnotherMagicLampEffectKCM::YetAnotherMagicLampEffectKCM(QObject* parent, const KPluginMetaData& data)
+    : KCModule(parent, data)
 {
-    m_ui->setupUi(this);
-    addConfig(YetAnotherMagicLampConfig::self(), this);
-    load();
+    m_ui.setupUi(widget());
+    YetAnotherMagicLampConfig::self()->setSharedConfig(KSharedConfig::openConfig(QStringLiteral("kwinrc")));
+    YetAnotherMagicLampConfig::self()->load();
+    addConfig(YetAnotherMagicLampConfig::self(), widget());
 }
 
 YetAnotherMagicLampEffectKCM::~YetAnotherMagicLampEffectKCM()
 {
-    delete m_ui;
 }
 
 void YetAnotherMagicLampEffectKCM::save()
@@ -44,3 +48,7 @@ void YetAnotherMagicLampEffectKCM::save()
         QDBusConnection::sessionBus());
     interface.reconfigureEffect(QStringLiteral("kwin4_effect_yetanothermagiclamp"));
 }
+
+#include "YetAnotherMagicLampEffectKCM.moc"
+
+#include "moc_YetAnotherMagicLampEffectKCM.cpp"

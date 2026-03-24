@@ -17,7 +17,7 @@
 
 #pragma once
 
-// KF5
+// KF6
 #include <KCModule>
 
 // Auto-generated
@@ -27,11 +27,11 @@ class YetAnotherMagicLampEffectKCM : public KCModule {
     Q_OBJECT
 
 public:
-    explicit YetAnotherMagicLampEffectKCM(QWidget* parent = nullptr, const QVariantList& args = {});
+    explicit YetAnotherMagicLampEffectKCM(QObject* parent, const KPluginMetaData& data);
     ~YetAnotherMagicLampEffectKCM() override;
 
     void save() override;
 
 private:
-    Ui::YetAnotherMagicLampEffectKCM* m_ui;
+    Ui::YetAnotherMagicLampEffectKCM m_ui;
 };
