@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(kwin-effects-yaml)
+project(kwin-effects-yet-another-magic-lamp)
 
 set(KF_MIN_VERSION "6.0.0")
 set(QT_MIN_VERSION "6.6.0")

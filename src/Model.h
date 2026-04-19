@@ -122,7 +122,7 @@ public:
      *
      * @see needsClip
      **/
-    QRegion clipRegion() const;
+    QRect clipRect() const;
 
 private:
     void applyBump(KWin::WindowQuadList& quads) const;
@@ -133,7 +133,7 @@ private:
     void updateMinimizeStage();
     void updateUnminimizeStage();
 
-    int computeBumpDistance() const;
+    qreal computeBumpDistance() const;
     qreal computeShapeFactor() const;
 
     Parameters m_parameters;
@@ -145,13 +145,13 @@ private:
         Squash
     };
 
-    KWin::EffectWindow* m_window;
-    AnimationKind m_kind;
-    AnimationStage m_stage;
+    KWin::EffectWindow* m_window = nullptr;
+    AnimationKind m_kind = AnimationKind::Minimize;
+    AnimationStage m_stage = AnimationStage::Bump;
     KWin::TimeLine m_timeLine;
-    Direction m_direction;
-    int m_bumpDistance;
-    qreal m_shapeFactor;
-    bool m_clip;
+    Direction m_direction = Direction::Bottom;
+    qreal m_bumpDistance = 0.0;
+    qreal m_shapeFactor = 0.0;
+    bool m_clip = false;
     bool m_done = false;
 };

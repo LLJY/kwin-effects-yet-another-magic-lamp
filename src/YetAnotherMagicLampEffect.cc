@@ -39,6 +39,8 @@ enum ShapeCurve {
 
 YetAnotherMagicLampEffect::YetAnotherMagicLampEffect()
 {
+    setVertexSnappingMode(KWin::RenderGeometry::VertexSnappingMode::None);
+
     YetAnotherMagicLampConfig::self()->setSharedConfig(KWin::effects->config());
     reconfigure(ReconfigureAll);
 
@@ -116,7 +118,7 @@ void YetAnotherMagicLampEffect::reconfigure(ReconfigureFlags flags)
     }
     m_modelParameters.shapeCurve = curve;
 
-    const int baseDuration = animationTime<YetAnotherMagicLampConfig>(std::chrono::milliseconds(300));
+    const int baseDuration = qMax(static_cast<int>(animationTime<YetAnotherMagicLampConfig>(std::chrono::milliseconds(300))), 1);
     m_modelParameters.squashDuration = std::chrono::milliseconds(baseDuration);
     m_modelParameters.stretchDuration = std::chrono::milliseconds(qMax(qRound(baseDuration * 0.7), 1));
     m_modelParameters.bumpDuration = std::chrono::milliseconds(baseDuration);
@@ -150,15 +152,17 @@ void YetAnotherMagicLampEffect::prePaintWindow(KWin::RenderView* view, KWin::Eff
 void YetAnotherMagicLampEffect::postPaintScreen()
 {
     for (auto it = m_animations.begin(); it != m_animations.end();) {
+        const QRect repaintRect = it->model.clipRect();
         if (it->model.done()) {
+            KWin::effects->addRepaint(repaintRect);
             unredirect(it.key());
             it = m_animations.erase(it);
         } else {
+            KWin::effects->addRepaint(repaintRect);
             ++it;
         }
     }
 
-    KWin::effects->addRepaintFull();
     KWin::effects->postPaintScreen();
 }
 
@@ -221,7 +225,7 @@ void YetAnotherMagicLampEffect::slotWindowMinimized(KWin::EffectWindow* w)
 
     redirect(w);
 
-    KWin::effects->addRepaintFull();
+    KWin::effects->addRepaint(animData.model.clipRect());
 }
 
 void YetAnotherMagicLampEffect::slotWindowUnminimized(KWin::EffectWindow* w)
@@ -248,7 +252,7 @@ void YetAnotherMagicLampEffect::slotWindowUnminimized(KWin::EffectWindow* w)
 
     redirect(w);
 
-    KWin::effects->addRepaintFull();
+    KWin::effects->addRepaint(animData.model.clipRect());
 }
 
 void YetAnotherMagicLampEffect::slotWindowDeleted(KWin::EffectWindow* w)

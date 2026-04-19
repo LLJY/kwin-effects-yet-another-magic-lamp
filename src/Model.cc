@@ -74,7 +74,13 @@ static Direction realizeDirection(const KWin::EffectWindow* window)
 
         KWin::LogicalOutput* screen = KWin::effects->screenAt(iconRect.center().toPoint());
 
-        const QRectF screenRect = KWin::effects->clientArea(KWin::ScreenArea, screen, KWin::effects->currentDesktop());
+        QRectF screenRect;
+        if (screen) {
+            screenRect = KWin::effects->clientArea(KWin::ScreenArea, screen, KWin::effects->currentDesktop());
+        } else {
+            // Fallback when icon is off-screen (e.g. autohide panel)
+            screenRect = KWin::effects->clientArea(KWin::ScreenArea, window);
+        }
         const QRectF constrainedRect = screenRect.intersected(iconRect);
 
         if (qFuzzyIsNull(constrainedRect.left() - screenRect.left()))
@@ -146,7 +152,7 @@ void Model::start(AnimationKind kind)
 
     switch (m_kind) {
     case AnimationKind::Minimize:
-        if (m_bumpDistance != 0) {
+        if (!qFuzzyIsNull(m_bumpDistance)) {
             m_stage = AnimationStage::Bump;
             m_timeLine.reset();
             m_timeLine.setDirection(KWin::TimeLine::Forward);
@@ -241,7 +247,7 @@ void Model::updateUnminimizeStage()
         return;
 
     case AnimationStage::Stretch1:
-        if (m_bumpDistance == 0) {
+        if (qFuzzyIsNull(m_bumpDistance)) {
             m_done = true;
             return;
         }
@@ -288,10 +294,11 @@ struct TransformParameters {
     qreal bumpDistance;
 };
 
-static inline qreal interpolate(qreal from, qreal to, qreal t)
-{
-    return from * (1.0 - t) + to * t;
-}
+// For Left/Right: quads in the same column share x-coords (quad[0].x(), quad[2].x()).
+// For Top/Bottom: quads in the same row share y-coords (quad[0].y(), quad[2].y()).
+// We cache the expensive shapeCurve.valueForProgress() across quads that share
+// the same leading-edge coordinate, reducing curve evaluations from N_quads*2
+// to N_rows*2 (or N_cols*2).
 
 static void transformQuadsLeft(
     const KWin::EffectWindow* window,
@@ -302,28 +309,45 @@ static void transformQuadsLeft(
     const QRectF windowRect = window->frameGeometry();
 
     const qreal distance = windowRect.right() - iconRect.right() + params.bumpDistance;
+    const qreal invDistance = 1.0 / distance;
+    const qreal squashShift = distance * params.squashProgress;
+    const qreal bumpShift = params.bumpDistance * params.bumpProgress;
+    const qreal iconY = iconRect.y();
+    const qreal yScale = iconRect.height() / windowRect.height();
+    const qreal winWidth = windowRect.width();
+    const qreal winY = windowRect.y();
+
+    qreal prevLeftX = -1.0, prevRightX = -1.0;
+    qreal leftScale = 0.0, rightScale = 0.0;
+    qreal leftOffset = 0.0, rightOffset = 0.0;
+    qreal targetLeftOffset = 0.0, targetRightOffset = 0.0;
 
     for (int i = 0; i < quads.count(); ++i) {
         KWin::WindowQuad& quad = quads[i];
 
-        const qreal leftOffset = quad[0].x() - interpolate(0.0, distance, params.squashProgress);
-        const qreal rightOffset = quad[2].x() - interpolate(0.0, distance, params.squashProgress);
+        if (quad[0].x() != prevLeftX || quad[2].x() != prevRightX) {
+            prevLeftX = quad[0].x();
+            prevRightX = quad[2].x();
 
-        const qreal leftScale = params.stretchProgress * params.shapeCurve.valueForProgress((windowRect.width() - leftOffset) / distance);
-        const qreal rightScale = params.stretchProgress * params.shapeCurve.valueForProgress((windowRect.width() - rightOffset) / distance);
+            leftOffset = prevLeftX - squashShift;
+            rightOffset = prevRightX - squashShift;
 
-        const qreal targetTopLeftY = iconRect.y() + iconRect.height() * quad[0].y() / windowRect.height();
-        const qreal targetTopRightY = iconRect.y() + iconRect.height() * quad[1].y() / windowRect.height();
-        const qreal targetBottomRightY = iconRect.y() + iconRect.height() * quad[2].y() / windowRect.height();
-        const qreal targetBottomLeftY = iconRect.y() + iconRect.height() * quad[3].y() / windowRect.height();
+            leftScale = params.stretchProgress * params.shapeCurve.valueForProgress((winWidth - leftOffset) * invDistance);
+            rightScale = params.stretchProgress * params.shapeCurve.valueForProgress((winWidth - rightOffset) * invDistance);
 
-        quad[0].setY(quad[0].y() + leftScale * (targetTopLeftY - (windowRect.y() + quad[0].y())));
-        quad[3].setY(quad[3].y() + leftScale * (targetBottomLeftY - (windowRect.y() + quad[3].y())));
-        quad[1].setY(quad[1].y() + rightScale * (targetTopRightY - (windowRect.y() + quad[1].y())));
-        quad[2].setY(quad[2].y() + rightScale * (targetBottomRightY - (windowRect.y() + quad[2].y())));
+            targetLeftOffset = leftOffset + bumpShift;
+            targetRightOffset = rightOffset + bumpShift;
+        }
 
-        const qreal targetLeftOffset = leftOffset + params.bumpDistance * params.bumpProgress;
-        const qreal targetRightOffset = rightOffset + params.bumpDistance * params.bumpProgress;
+        const qreal targetTopLeftY = iconY + yScale * quad[0].y();
+        const qreal targetBottomLeftY = iconY + yScale * quad[3].y();
+        const qreal targetTopRightY = iconY + yScale * quad[1].y();
+        const qreal targetBottomRightY = iconY + yScale * quad[2].y();
+
+        quad[0].setY(quad[0].y() + leftScale * (targetTopLeftY - (winY + quad[0].y())));
+        quad[3].setY(quad[3].y() + leftScale * (targetBottomLeftY - (winY + quad[3].y())));
+        quad[1].setY(quad[1].y() + rightScale * (targetTopRightY - (winY + quad[1].y())));
+        quad[2].setY(quad[2].y() + rightScale * (targetBottomRightY - (winY + quad[2].y())));
 
         quad[0].setX(targetLeftOffset);
         quad[3].setX(targetLeftOffset);
@@ -341,28 +365,45 @@ static void transformQuadsTop(
     const QRectF windowRect = window->frameGeometry();
 
     const qreal distance = windowRect.bottom() - iconRect.bottom() + params.bumpDistance;
+    const qreal invDistance = 1.0 / distance;
+    const qreal squashShift = distance * params.squashProgress;
+    const qreal bumpShift = params.bumpDistance * params.bumpProgress;
+    const qreal iconX = iconRect.x();
+    const qreal xScale = iconRect.width() / windowRect.width();
+    const qreal winHeight = windowRect.height();
+    const qreal winX = windowRect.x();
+
+    qreal prevTopY = -1.0, prevBottomY = -1.0;
+    qreal topScale = 0.0, bottomScale = 0.0;
+    qreal topOffset = 0.0, bottomOffset = 0.0;
+    qreal targetTopOffset = 0.0, targetBottomOffset = 0.0;
 
     for (int i = 0; i < quads.count(); ++i) {
         KWin::WindowQuad& quad = quads[i];
 
-        const qreal topOffset = quad[0].y() - interpolate(0.0, distance, params.squashProgress);
-        const qreal bottomOffset = quad[2].y() - interpolate(0.0, distance, params.squashProgress);
+        if (quad[0].y() != prevTopY || quad[2].y() != prevBottomY) {
+            prevTopY = quad[0].y();
+            prevBottomY = quad[2].y();
 
-        const qreal topScale = params.stretchProgress * params.shapeCurve.valueForProgress((windowRect.height() - topOffset) / distance);
-        const qreal bottomScale = params.stretchProgress * params.shapeCurve.valueForProgress((windowRect.height() - bottomOffset) / distance);
+            topOffset = prevTopY - squashShift;
+            bottomOffset = prevBottomY - squashShift;
 
-        const qreal targetTopLeftX = iconRect.x() + iconRect.width() * quad[0].x() / windowRect.width();
-        const qreal targetTopRightX = iconRect.x() + iconRect.width() * quad[1].x() / windowRect.width();
-        const qreal targetBottomRightX = iconRect.x() + iconRect.width() * quad[2].x() / windowRect.width();
-        const qreal targetBottomLeftX = iconRect.x() + iconRect.width() * quad[3].x() / windowRect.width();
+            topScale = params.stretchProgress * params.shapeCurve.valueForProgress((winHeight - topOffset) * invDistance);
+            bottomScale = params.stretchProgress * params.shapeCurve.valueForProgress((winHeight - bottomOffset) * invDistance);
 
-        quad[0].setX(quad[0].x() + topScale * (targetTopLeftX - (windowRect.x() + quad[0].x())));
-        quad[1].setX(quad[1].x() + topScale * (targetTopRightX - (windowRect.x() + quad[1].x())));
-        quad[2].setX(quad[2].x() + bottomScale * (targetBottomRightX - (windowRect.x() + quad[2].x())));
-        quad[3].setX(quad[3].x() + bottomScale * (targetBottomLeftX - (windowRect.x() + quad[3].x())));
+            targetTopOffset = topOffset + bumpShift;
+            targetBottomOffset = bottomOffset + bumpShift;
+        }
 
-        const qreal targetTopOffset = topOffset + params.bumpDistance * params.bumpProgress;
-        const qreal targetBottomOffset = bottomOffset + params.bumpDistance * params.bumpProgress;
+        const qreal targetTopLeftX = iconX + xScale * quad[0].x();
+        const qreal targetTopRightX = iconX + xScale * quad[1].x();
+        const qreal targetBottomRightX = iconX + xScale * quad[2].x();
+        const qreal targetBottomLeftX = iconX + xScale * quad[3].x();
+
+        quad[0].setX(quad[0].x() + topScale * (targetTopLeftX - (winX + quad[0].x())));
+        quad[1].setX(quad[1].x() + topScale * (targetTopRightX - (winX + quad[1].x())));
+        quad[2].setX(quad[2].x() + bottomScale * (targetBottomRightX - (winX + quad[2].x())));
+        quad[3].setX(quad[3].x() + bottomScale * (targetBottomLeftX - (winX + quad[3].x())));
 
         quad[0].setY(targetTopOffset);
         quad[1].setY(targetTopOffset);
@@ -380,28 +421,44 @@ static void transformQuadsRight(
     const QRectF windowRect = window->frameGeometry();
 
     const qreal distance = iconRect.left() - windowRect.left() + params.bumpDistance;
+    const qreal invDistance = 1.0 / distance;
+    const qreal squashShift = distance * params.squashProgress;
+    const qreal bumpShift = params.bumpDistance * params.bumpProgress;
+    const qreal iconY = iconRect.y();
+    const qreal yScale = iconRect.height() / windowRect.height();
+    const qreal winY = windowRect.y();
+
+    qreal prevLeftX = -1.0, prevRightX = -1.0;
+    qreal leftScale = 0.0, rightScale = 0.0;
+    qreal leftOffset = 0.0, rightOffset = 0.0;
+    qreal targetLeftOffset = 0.0, targetRightOffset = 0.0;
 
     for (int i = 0; i < quads.count(); ++i) {
         KWin::WindowQuad& quad = quads[i];
 
-        const qreal leftOffset = quad[0].x() + interpolate(0.0, distance, params.squashProgress);
-        const qreal rightOffset = quad[2].x() + interpolate(0.0, distance, params.squashProgress);
+        if (quad[0].x() != prevLeftX || quad[2].x() != prevRightX) {
+            prevLeftX = quad[0].x();
+            prevRightX = quad[2].x();
 
-        const qreal leftScale = params.stretchProgress * params.shapeCurve.valueForProgress(leftOffset / distance);
-        const qreal rightScale = params.stretchProgress * params.shapeCurve.valueForProgress(rightOffset / distance);
+            leftOffset = prevLeftX + squashShift;
+            rightOffset = prevRightX + squashShift;
 
-        const qreal targetTopLeftY = iconRect.y() + iconRect.height() * quad[0].y() / windowRect.height();
-        const qreal targetTopRightY = iconRect.y() + iconRect.height() * quad[1].y() / windowRect.height();
-        const qreal targetBottomRightY = iconRect.y() + iconRect.height() * quad[2].y() / windowRect.height();
-        const qreal targetBottomLeftY = iconRect.y() + iconRect.height() * quad[3].y() / windowRect.height();
+            leftScale = params.stretchProgress * params.shapeCurve.valueForProgress(leftOffset * invDistance);
+            rightScale = params.stretchProgress * params.shapeCurve.valueForProgress(rightOffset * invDistance);
 
-        quad[0].setY(quad[0].y() + leftScale * (targetTopLeftY - (windowRect.y() + quad[0].y())));
-        quad[3].setY(quad[3].y() + leftScale * (targetBottomLeftY - (windowRect.y() + quad[3].y())));
-        quad[1].setY(quad[1].y() + rightScale * (targetTopRightY - (windowRect.y() + quad[1].y())));
-        quad[2].setY(quad[2].y() + rightScale * (targetBottomRightY - (windowRect.y() + quad[2].y())));
+            targetLeftOffset = leftOffset - bumpShift;
+            targetRightOffset = rightOffset - bumpShift;
+        }
 
-        const qreal targetLeftOffset = leftOffset - params.bumpDistance * params.bumpProgress;
-        const qreal targetRightOffset = rightOffset - params.bumpDistance * params.bumpProgress;
+        const qreal targetTopLeftY = iconY + yScale * quad[0].y();
+        const qreal targetBottomLeftY = iconY + yScale * quad[3].y();
+        const qreal targetTopRightY = iconY + yScale * quad[1].y();
+        const qreal targetBottomRightY = iconY + yScale * quad[2].y();
+
+        quad[0].setY(quad[0].y() + leftScale * (targetTopLeftY - (winY + quad[0].y())));
+        quad[3].setY(quad[3].y() + leftScale * (targetBottomLeftY - (winY + quad[3].y())));
+        quad[1].setY(quad[1].y() + rightScale * (targetTopRightY - (winY + quad[1].y())));
+        quad[2].setY(quad[2].y() + rightScale * (targetBottomRightY - (winY + quad[2].y())));
 
         quad[0].setX(targetLeftOffset);
         quad[3].setX(targetLeftOffset);
@@ -419,28 +476,44 @@ static void transformQuadsBottom(
     const QRectF windowRect = window->frameGeometry();
 
     const qreal distance = iconRect.top() - windowRect.top() + params.bumpDistance;
+    const qreal invDistance = 1.0 / distance;
+    const qreal squashShift = distance * params.squashProgress;
+    const qreal bumpShift = params.bumpDistance * params.bumpProgress;
+    const qreal iconX = iconRect.x();
+    const qreal xScale = iconRect.width() / windowRect.width();
+    const qreal winX = windowRect.x();
+
+    qreal prevTopY = -1.0, prevBottomY = -1.0;
+    qreal topScale = 0.0, bottomScale = 0.0;
+    qreal topOffset = 0.0, bottomOffset = 0.0;
+    qreal targetTopOffset = 0.0, targetBottomOffset = 0.0;
 
     for (int i = 0; i < quads.count(); ++i) {
         KWin::WindowQuad& quad = quads[i];
 
-        const qreal topOffset = quad[0].y() + interpolate(0.0, distance, params.squashProgress);
-        const qreal bottomOffset = quad[2].y() + interpolate(0.0, distance, params.squashProgress);
+        if (quad[0].y() != prevTopY || quad[2].y() != prevBottomY) {
+            prevTopY = quad[0].y();
+            prevBottomY = quad[2].y();
 
-        const qreal topScale = params.stretchProgress * params.shapeCurve.valueForProgress(topOffset / distance);
-        const qreal bottomScale = params.stretchProgress * params.shapeCurve.valueForProgress(bottomOffset / distance);
+            topOffset = prevTopY + squashShift;
+            bottomOffset = prevBottomY + squashShift;
 
-        const qreal targetTopLeftX = iconRect.x() + iconRect.width() * quad[0].x() / windowRect.width();
-        const qreal targetTopRightX = iconRect.x() + iconRect.width() * quad[1].x() / windowRect.width();
-        const qreal targetBottomRightX = iconRect.x() + iconRect.width() * quad[2].x() / windowRect.width();
-        const qreal targetBottomLeftX = iconRect.x() + iconRect.width() * quad[3].x() / windowRect.width();
+            topScale = params.stretchProgress * params.shapeCurve.valueForProgress(topOffset * invDistance);
+            bottomScale = params.stretchProgress * params.shapeCurve.valueForProgress(bottomOffset * invDistance);
 
-        quad[0].setX(quad[0].x() + topScale * (targetTopLeftX - (windowRect.x() + quad[0].x())));
-        quad[1].setX(quad[1].x() + topScale * (targetTopRightX - (windowRect.x() + quad[1].x())));
-        quad[2].setX(quad[2].x() + bottomScale * (targetBottomRightX - (windowRect.x() + quad[2].x())));
-        quad[3].setX(quad[3].x() + bottomScale * (targetBottomLeftX - (windowRect.x() + quad[3].x())));
+            targetTopOffset = topOffset - bumpShift;
+            targetBottomOffset = bottomOffset - bumpShift;
+        }
 
-        const qreal targetTopOffset = topOffset - params.bumpDistance * params.bumpProgress;
-        const qreal targetBottomOffset = bottomOffset - params.bumpDistance * params.bumpProgress;
+        const qreal targetTopLeftX = iconX + xScale * quad[0].x();
+        const qreal targetTopRightX = iconX + xScale * quad[1].x();
+        const qreal targetBottomRightX = iconX + xScale * quad[2].x();
+        const qreal targetBottomLeftX = iconX + xScale * quad[3].x();
+
+        quad[0].setX(quad[0].x() + topScale * (targetTopLeftX - (winX + quad[0].x())));
+        quad[1].setX(quad[1].x() + topScale * (targetTopRightX - (winX + quad[1].x())));
+        quad[2].setX(quad[2].x() + bottomScale * (targetBottomRightX - (winX + quad[2].x())));
+        quad[3].setX(quad[3].x() + bottomScale * (targetBottomLeftX - (winX + quad[3].x())));
 
         quad[0].setY(targetTopOffset);
         quad[1].setY(targetTopOffset);
@@ -570,53 +643,53 @@ bool Model::needsClip() const
     return m_clip;
 }
 
-QRegion Model::clipRegion() const
+QRect Model::clipRect() const
 {
     const QRectF iconRect = m_window->iconGeometry();
-    QRectF clipRect = m_window->expandedGeometry();
+    QRectF cr = m_window->expandedGeometry();
 
     switch (m_direction) {
     case Direction::Top:
-        clipRect.translate(0, m_bumpDistance);
-        clipRect.setTop(iconRect.top());
-        clipRect.setLeft(qMin(iconRect.left(), clipRect.left()));
-        clipRect.setRight(qMax(iconRect.right(), clipRect.right()));
+        cr.translate(0, m_bumpDistance);
+        cr.setTop(iconRect.top());
+        cr.setLeft(qMin(iconRect.left(), cr.left()));
+        cr.setRight(qMax(iconRect.right(), cr.right()));
         break;
 
     case Direction::Right:
-        clipRect.translate(-m_bumpDistance, 0);
-        clipRect.setRight(iconRect.right());
-        clipRect.setTop(qMin(iconRect.top(), clipRect.top()));
-        clipRect.setBottom(qMax(iconRect.bottom(), clipRect.bottom()));
+        cr.translate(-m_bumpDistance, 0);
+        cr.setRight(iconRect.right());
+        cr.setTop(qMin(iconRect.top(), cr.top()));
+        cr.setBottom(qMax(iconRect.bottom(), cr.bottom()));
         break;
 
     case Direction::Bottom:
-        clipRect.translate(0, -m_bumpDistance);
-        clipRect.setBottom(iconRect.bottom());
-        clipRect.setLeft(qMin(iconRect.left(), clipRect.left()));
-        clipRect.setRight(qMax(iconRect.right(), clipRect.right()));
+        cr.translate(0, -m_bumpDistance);
+        cr.setBottom(iconRect.bottom());
+        cr.setLeft(qMin(iconRect.left(), cr.left()));
+        cr.setRight(qMax(iconRect.right(), cr.right()));
         break;
 
     case Direction::Left:
-        clipRect.translate(m_bumpDistance, 0);
-        clipRect.setLeft(iconRect.left());
-        clipRect.setTop(qMin(iconRect.top(), clipRect.top()));
-        clipRect.setBottom(qMax(iconRect.bottom(), clipRect.bottom()));
+        cr.translate(m_bumpDistance, 0);
+        cr.setLeft(iconRect.left());
+        cr.setTop(qMin(iconRect.top(), cr.top()));
+        cr.setBottom(qMax(iconRect.bottom(), cr.bottom()));
         break;
 
     default:
         Q_UNREACHABLE();
     }
 
-    return clipRect.toAlignedRect();
+    return cr.toAlignedRect();
 }
 
-int Model::computeBumpDistance() const
+qreal Model::computeBumpDistance() const
 {
     const QRectF windowRect = m_window->frameGeometry();
     const QRectF iconRect = m_window->iconGeometry();
 
-    qreal bumpDistance = 0;
+    qreal bumpDistance = 0.0;
     switch (m_direction) {
     case Direction::Top:
         bumpDistance = std::max(qreal(0), iconRect.y() + iconRect.height() - windowRect.y());
@@ -648,8 +721,8 @@ qreal Model::computeShapeFactor() const
     const QRectF windowRect = m_window->frameGeometry();
     const QRectF iconRect = m_window->iconGeometry();
 
-    int movingExtent = 0;
-    int distanceToIcon = 0;
+    qreal movingExtent = 0.0;
+    qreal distanceToIcon = 0.0;
     switch (m_direction) {
     case Direction::Top:
         movingExtent = windowRect.height();
@@ -675,6 +748,10 @@ qreal Model::computeShapeFactor() const
         Q_UNREACHABLE();
     }
 
-    const qreal minimumShapeFactor = static_cast<qreal>(movingExtent) / distanceToIcon;
+    if (distanceToIcon <= 0.0) {
+        return 1.0;
+    }
+
+    const qreal minimumShapeFactor = movingExtent / distanceToIcon;
     return qMax(m_parameters.shapeFactor, minimumShapeFactor);
 }

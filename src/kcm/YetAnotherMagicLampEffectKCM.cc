@@ -25,7 +25,7 @@
 #include <KPluginFactory>
 #include <KSharedConfig>
 
-K_PLUGIN_CLASS(YetAnotherMagicLampEffectKCM)
+K_PLUGIN_CLASS_WITH_JSON(YetAnotherMagicLampEffectKCM, "metadata.json")
 
 YetAnotherMagicLampEffectKCM::YetAnotherMagicLampEffectKCM(QObject* parent, const KPluginMetaData& data)
     : KCModule(parent, data)
