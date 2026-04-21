@@ -37,6 +37,19 @@ enum ShapeCurve {
     Bezier = 8
 };
 
+namespace {
+
+int stripSubdivisionCount(qreal extent, int maxStripSize)
+{
+    if (extent <= 0.0) {
+        return 1;
+    }
+
+    return std::max(1, static_cast<int>(std::ceil(extent / static_cast<qreal>(maxStripSize))));
+}
+
+} // namespace
+
 YetAnotherMagicLampEffect::YetAnotherMagicLampEffect()
 {
     setVertexSnappingMode(KWin::RenderGeometry::VertexSnappingMode::None);
@@ -176,8 +189,29 @@ void YetAnotherMagicLampEffect::apply(KWin::EffectWindow* window, int mask, KWin
         return;
     }
 
-    quads = quads.makeGrid(m_gridResolution);
-    (*it).model.apply(quads);
+    const Model& model = (*it).model;
+    const QRectF geometry = window->expandedGeometry();
+
+    switch (model.direction()) {
+    case Direction::Top:
+    case Direction::Bottom: {
+        const int rows = stripSubdivisionCount(geometry.height(), m_gridResolution);
+        quads = quads.makeRegularGrid(1, rows);
+        break;
+    }
+
+    case Direction::Left:
+    case Direction::Right: {
+        const int columns = stripSubdivisionCount(geometry.width(), m_gridResolution);
+        quads = quads.makeRegularGrid(columns, 1);
+        break;
+    }
+
+    default:
+        Q_UNREACHABLE();
+    }
+
+    model.apply(quads);
 }
 
 bool YetAnotherMagicLampEffect::isActive() const

@@ -633,6 +633,11 @@ KWin::EffectWindow* Model::window() const
     return m_window;
 }
 
+Direction Model::direction() const
+{
+    return m_direction;
+}
+
 void Model::setWindow(KWin::EffectWindow* window)
 {
     m_window = window;

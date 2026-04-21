@@ -104,6 +104,11 @@ public:
     KWin::EffectWindow* window() const;
 
     /**
+     * Returns the realized animation direction.
+     **/
+    Direction direction() const;
+
+    /**
      * Sets the associated window.
      *
      * @param window The window associated with this model.
