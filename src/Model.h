@@ -69,9 +69,9 @@ public:
     void start(AnimationKind kind);
 
     /**
-     * Updates the model to @p presentTime.
+     * Advances the model using timing from @p view.
      **/
-    void advance(std::chrono::milliseconds presentTime);
+    void advance(const KWin::RenderView* view);
 
     /**
      * Returns whether the animation is complete.

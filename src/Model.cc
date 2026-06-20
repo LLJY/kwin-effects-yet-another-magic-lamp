@@ -76,7 +76,7 @@ static Direction realizeDirection(const KWin::EffectWindow* window)
 
         QRectF screenRect;
         if (screen) {
-            screenRect = KWin::effects->clientArea(KWin::ScreenArea, screen, KWin::effects->currentDesktop());
+            screenRect = KWin::effects->clientArea(KWin::ScreenArea, screen);
         } else {
             // Fallback when icon is off-screen (e.g. autohide panel)
             screenRect = KWin::effects->clientArea(KWin::ScreenArea, window);
@@ -184,9 +184,9 @@ void Model::start(AnimationKind kind)
     }
 }
 
-void Model::advance(std::chrono::milliseconds presentTime)
+void Model::advance(const KWin::RenderView* view)
 {
-    m_timeLine.advance(presentTime);
+    m_timeLine.advance(view);
     if (!m_timeLine.done()) {
         return;
     }

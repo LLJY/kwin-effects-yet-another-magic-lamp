@@ -23,6 +23,7 @@
 #include "YetAnotherMagicLampConfig.h"
 
 // std
+#include <algorithm>
 #include <cmath>
 
 enum ShapeCurve {
@@ -131,41 +132,44 @@ void YetAnotherMagicLampEffect::reconfigure(ReconfigureFlags flags)
     }
     m_modelParameters.shapeCurve = curve;
 
-    const int baseDuration = qMax(static_cast<int>(animationTime<YetAnotherMagicLampConfig>(std::chrono::milliseconds(300))), 1);
-    m_modelParameters.squashDuration = std::chrono::milliseconds(baseDuration);
-    m_modelParameters.stretchDuration = std::chrono::milliseconds(qMax(qRound(baseDuration * 0.7), 1));
-    m_modelParameters.bumpDuration = std::chrono::milliseconds(baseDuration);
+    const auto baseDuration = std::max(animationTime<YetAnotherMagicLampConfig>(std::chrono::milliseconds(300)), std::chrono::milliseconds(1));
+    const int baseDurationMs = static_cast<int>(baseDuration.count());
+    m_modelParameters.squashDuration = baseDuration;
+    m_modelParameters.stretchDuration = std::chrono::milliseconds(qMax(qRound(baseDurationMs * 0.7), 1));
+    m_modelParameters.bumpDuration = baseDuration;
     m_modelParameters.shapeFactor = YetAnotherMagicLampConfig::initialShapeFactor();
     m_modelParameters.bumpDistance = YetAnotherMagicLampConfig::maxBumpDistance();
 
     m_gridResolution = qMax(1, static_cast<int>(YetAnotherMagicLampConfig::gridResolution()));
 }
 
-void YetAnotherMagicLampEffect::prePaintScreen(KWin::ScreenPrePaintData& data, std::chrono::milliseconds presentTime)
+void YetAnotherMagicLampEffect::prePaintScreen(KWin::ScreenPrePaintData& data)
 {
-    for (AnimationData& animData : m_animations) {
-        animData.model.advance(presentTime);
+    if (data.view) {
+        for (AnimationData& animData : m_animations) {
+            animData.model.advance(data.view);
+        }
     }
 
     data.mask |= PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS;
 
-    KWin::effects->prePaintScreen(data, presentTime);
+    KWin::effects->prePaintScreen(data);
 }
 
-void YetAnotherMagicLampEffect::prePaintWindow(KWin::RenderView* view, KWin::EffectWindow* w, KWin::WindowPrePaintData& data, std::chrono::milliseconds presentTime)
+void YetAnotherMagicLampEffect::prePaintWindow(KWin::RenderView* view, KWin::EffectWindow* w, KWin::WindowPrePaintData& data)
 {
     auto it = m_animations.find(w);
     if (it != m_animations.end()) {
         data.setTransformed();
     }
 
-    KWin::effects->prePaintWindow(view, w, data, presentTime);
+    KWin::effects->prePaintWindow(view, w, data);
 }
 
 void YetAnotherMagicLampEffect::postPaintScreen()
 {
     for (auto it = m_animations.begin(); it != m_animations.end();) {
-        const QRect repaintRect = it->model.clipRect();
+        const KWin::RectF repaintRect = it->model.clipRect();
         if (it->model.done()) {
             KWin::effects->addRepaint(repaintRect);
             unredirect(it.key());
@@ -259,7 +263,7 @@ void YetAnotherMagicLampEffect::slotWindowMinimized(KWin::EffectWindow* w)
 
     redirect(w);
 
-    KWin::effects->addRepaint(animData.model.clipRect());
+    KWin::effects->addRepaint(KWin::RectF(animData.model.clipRect()));
 }
 
 void YetAnotherMagicLampEffect::slotWindowUnminimized(KWin::EffectWindow* w)
@@ -286,7 +290,7 @@ void YetAnotherMagicLampEffect::slotWindowUnminimized(KWin::EffectWindow* w)
 
     redirect(w);
 
-    KWin::effects->addRepaint(animData.model.clipRect());
+    KWin::effects->addRepaint(KWin::RectF(animData.model.clipRect()));
 }
 
 void YetAnotherMagicLampEffect::slotWindowDeleted(KWin::EffectWindow* w)
